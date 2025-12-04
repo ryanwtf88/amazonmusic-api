@@ -24,7 +24,7 @@ npm run deploy  # Deploy to Cloudflare Workers
 
 ## API Endpoints
 
-Base URL: `https://amazonmusic-api.ryanwtf.workers.dev`
+Base URL: `https://amazonmusic-api.ry4n.qzz.io`
 
 ### Search Tracks
 
@@ -218,8 +218,8 @@ Due to Amazon Music's client-side rendering:
 ## Documentation
 
 Interactive API documentation available at:
-- Swagger UI: `https://amazonmusic-api.ryanwtf.workers.dev/`
-- OpenAPI Spec: `https://amazonmusic-api.ryanwtf.workers.dev/swagger.json`
+- Swagger UI: `https://amazonmusic-api.ry4n.qzz.io/`
+- OpenAPI Spec: `https://amazonmusic-api.ry4n.qzz.io/swagger.json`
 
 ## TypeScript Client
 

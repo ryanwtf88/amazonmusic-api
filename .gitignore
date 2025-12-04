@@ -10,6 +10,7 @@ dist/
 # Cloudflare Workers
 .wrangler/
 .dev.vars
+.env
 
 # IDE
 .vscode/
