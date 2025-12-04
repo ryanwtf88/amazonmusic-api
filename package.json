@@ -1,0 +1,33 @@
+{
+    "name": "amazonmusic-api",
+    "version": "1.0.0",
+    "description": "TypeScript client for Amazon Music API - Cloudflare Workers deployment",
+    "main": "dist/index.js",
+    "types": "dist/amazonmusic.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "type-check": "tsc --noEmit",
+        "clean": "rm -rf dist .wrangler",
+        "dev": "wrangler dev",
+        "deploy": "wrangler deploy",
+        "publish": "npm run build && wrangler deploy"
+    },
+    "keywords": [
+        "amazon-music",
+        "music-api",
+        "typescript",
+        "cloudflare-workers",
+        "lavasrc"
+    ],
+    "author": "RY4N",
+    "license": "MIT",
+    "dependencies": {
+        "hono": "^4.0.0"
+    },
+    "devDependencies": {
+        "@cloudflare/workers-types": "^4.20231218.0",
+        "@types/node": "^20.10.5",
+        "typescript": "^5.3.3",
+        "wrangler": "^3.22.1"
+    }
+}
