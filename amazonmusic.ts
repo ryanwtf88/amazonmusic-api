@@ -235,39 +235,50 @@ export class AmazonMusicClient {
             site_name: '',
             audio: '',
             artist: '',
-            album: ''
+            album: '',
+            albumUrl: '',
+            duration: 0
         };
 
-        // Regex to match meta tags
-        const metaRegex = /\u003cmeta\s+property="og:([^"]+)"\s+content="([^"]*)"/g;
+        // Regex to match meta tags (both og: and music: properties)
+        const metaRegex = /\u003cmeta\s+property="(og:|music:)([^"]+)"\s+content="([^"]*)"/g;
         let match;
 
         while ((match = metaRegex.exec(html)) !== null) {
-            const property = match[1];
-            const content = match[2];
+            const prefix = match[1];
+            const property = match[2];
+            const content = match[3];
 
-            switch (property) {
-                case 'title':
-                    metadata.title = content;
-                    break;
-                case 'description':
-                    metadata.description = content;
-                    break;
-                case 'image':
-                case 'image:secure_url':
-                    if (!metadata.image) metadata.image = content;
-                    break;
-                case 'type':
-                    metadata.type = content;
-                    break;
-                case 'site_name':
-                    metadata.site_name = content;
-                    break;
-                case 'audio':
-                case 'audio:url':
-                case 'audio:secure_url':
-                    if (!metadata.audio) metadata.audio = content;
-                    break;
+            if (prefix === 'og:') {
+                switch (property) {
+                    case 'title':
+                        metadata.title = content;
+                        break;
+                    case 'description':
+                        metadata.description = content;
+                        break;
+                    case 'image':
+                    case 'image:secure_url':
+                        if (!metadata.image) metadata.image = content;
+                        break;
+                    case 'type':
+                        metadata.type = content;
+                        break;
+                    case 'site_name':
+                        metadata.site_name = content;
+                        break;
+                    case 'audio':
+                    case 'audio:url':
+                    case 'audio:secure_url':
+                        if (!metadata.audio) metadata.audio = content;
+                        break;
+                }
+            } else if (prefix === 'music:') {
+                switch (property) {
+                    case 'album':
+                        metadata.albumUrl = content;
+                        break;
+                }
             }
         }
 
@@ -291,17 +302,58 @@ export class AmazonMusicClient {
                     if (jsonLd.inAlbum) {
                         metadata.album = jsonLd.inAlbum.name || '';
                     }
+                    if (jsonLd.duration) {
+                        // Duration in ISO 8601 format (PT3M52S = 3 minutes 52 seconds)
+                        const durationMatch = /PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/.exec(jsonLd.duration);
+                        if (durationMatch) {
+                            const hours = parseInt(durationMatch[1] || '0');
+                            const minutes = parseInt(durationMatch[2] || '0');
+                            const seconds = parseInt(durationMatch[3] || '0');
+                            metadata.duration = hours * 3600 + minutes * 60 + seconds;
+                        }
+                    }
                 }
             } catch (e) {
                 // JSON-LD parsing failed, continue
             }
         }
 
-        // If artist not found, try to extract from page title (format: "Song - Artist")
-        if (!metadata.artist && metadata.title && metadata.title.includes(' - ')) {
-            const parts = metadata.title.split(' - ');
-            if (parts.length >= 2) {
-                metadata.artist = parts[1].trim();
+        // Extract artist and album from title if not found
+        // Common patterns:
+        // "Song - Artist" or "Song – Artist" (en-dash)
+        // "Album – Artist" or "Album - Artist"
+        // "Song | Artist" 
+        if (!metadata.artist && metadata.title) {
+            // Try different separators: en-dash (–), hyphen (-), pipe (|)
+            const separators = [' – ', ' - ', ' | '];
+            for (const sep of separators) {
+                if (metadata.title.includes(sep)) {
+                    const parts = metadata.title.split(sep);
+                    if (parts.length >= 2) {
+                        // For tracks: "Song - Artist"
+                        // For albums: "Album – Artist"
+                        const potentialArtist = parts[parts.length - 1].trim();
+                        // Make sure it's not just "Amazon Music"
+                        if (potentialArtist && potentialArtist !== 'Amazon Music') {
+                            metadata.artist = potentialArtist;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        // Extract album from description if it contains "from" or "on"
+        // But avoid extracting "Amazon Music" as the album name
+        if (!metadata.album && metadata.description) {
+            // Pattern: "from [Album Name]" or "on [Album Name]"
+            const albumMatch = /(?:from|on)\s+["']?([^"']+)["']?/i.exec(metadata.description);
+            if (albumMatch) {
+                const potentialAlbum = albumMatch[1].trim();
+                // Don't use "Amazon Music" as album name
+                if (potentialAlbum && potentialAlbum !== 'Amazon Music') {
+                    metadata.album = potentialAlbum;
+                }
             }
         }
 
@@ -321,20 +373,42 @@ export class AmazonMusicClient {
             return null;
         }
 
+        // Try to get artist and album from the album URL if available
+        let artistName = metadata.artist || 'Unknown Artist';
+        let albumName = metadata.album || 'Unknown Album';
+        let albumUrl = '';
+
+        // Check if there's a music:album tag with album URL
+        if (metadata.albumUrl) {
+            try {
+                const albumId = this.parseUrl(metadata.albumUrl)?.id;
+                if (albumId) {
+                    const albumData = await this.getAlbum(albumId);
+                    if (albumData) {
+                        artistName = albumData.artist.name;
+                        albumName = albumData.name;
+                        albumUrl = albumData.url;
+                    }
+                }
+            } catch (e) {
+                console.error('Error fetching album for track:', e);
+            }
+        }
+
         return {
-            id: id,
+            id,
             name: metadata.title,
             title: metadata.title,
             artist: {
-                name: metadata.artist || 'Unknown Artist',
-                url: metadata.artist ? `https://music.amazon.com/search/${encodeURIComponent(metadata.artist)}` : ''
+                name: artistName,
+                url: ''
             },
-            duration: 0, // Duration not available via OpenGraph scraping
+            duration: metadata.duration || 0,
             url: metadata.url,
             image: metadata.image,
             album: {
-                name: metadata.album || 'Unknown Album',
-                url: metadata.album ? `https://music.amazon.com/search/${encodeURIComponent(metadata.album)}` : ''
+                name: albumName,
+                url: albumUrl || `https://music.amazon.com/search/${encodeURIComponent(albumName)}`
             }
         };
     }
@@ -352,12 +426,28 @@ export class AmazonMusicClient {
             return null;
         }
 
+        // Extract artist from title if it contains separator
+        let artistName = 'Unknown Artist';
+        let albumName = metadata.title;
+
+        const separators = [' – ', ' - ', ' | '];
+        for (const sep of separators) {
+            if (metadata.title.includes(sep)) {
+                const parts = metadata.title.split(sep);
+                if (parts.length >= 2) {
+                    albumName = parts[0].trim();
+                    artistName = parts[parts.length - 1].trim();
+                }
+                break;
+            }
+        }
+
         return {
-            name: metadata.title,
+            name: albumName,
             url: metadata.url,
             image: metadata.image,
             artist: {
-                name: metadata.description.replace('On Amazon Music', '').trim() || 'Unknown Artist',
+                name: artistName,
                 url: ''
             },
             songs: [], // Track list not available in OG tags
@@ -481,14 +571,24 @@ export class AmazonMusicClient {
                     if (parsed && parsed.type === 'tracks' && !processedIds.has(parsed.id)) {
                         processedIds.add(parsed.id);
 
-                        results.push({
-                            id: parsed.id,
-                            name: `Result ${parsed.id}`,
-                            url: `https://music.amazon.com/${parsed.type}/${parsed.id}`,
-                            artist: { name: 'Unknown' },
-                            album: { name: 'Unknown' },
-                            duration: 0
-                        } as Track);
+                        // Fetch actual track metadata
+                        try {
+                            const trackData = await this.getTrack(parsed.id);
+                            if (trackData) {
+                                results.push(trackData);
+                            }
+                        } catch (e) {
+                            console.error(`Error fetching track ${parsed.id}:`, e);
+                            // Fallback to basic data if fetch fails
+                            results.push({
+                                id: parsed.id,
+                                name: `Track ${parsed.id}`,
+                                url: `https://music.amazon.com/${parsed.type}/${parsed.id}`,
+                                artist: { name: 'Unknown' },
+                                album: { name: 'Unknown' },
+                                duration: 0
+                            } as Track);
+                        }
                     }
                 } catch (e) {
                     console.error('Error parsing search result:', e);
